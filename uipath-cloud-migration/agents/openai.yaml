@@ -1,0 +1,4 @@
+interface:
+  display_name: "UiPath Cloud Migration"
+  short_description: "Migrate UiPath On-Prem entities."
+  default_prompt: "Use this skill to discover, diff, plan, validate, and safely migrate practical UiPath Orchestrator entities from On-Premises to Automation Cloud, including folders, users, roles, machines, credential stores, assets, queues, storage buckets, packages, libraries, processes, triggers, webhooks, calendars, feeds, and settings."

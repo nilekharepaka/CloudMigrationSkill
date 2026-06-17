@@ -1,0 +1,75 @@
+{
+  "dependency_order": [
+    "folders",
+    "credential_stores",
+    "roles",
+    "users",
+    "machines",
+    "robots",
+    "environments",
+    "assets",
+    "queues",
+    "storage_buckets",
+    "packages",
+    "libraries",
+    "processes",
+    "calendars",
+    "triggers",
+    "webhooks",
+    "feeds",
+    "settings"
+  ],
+  "mappings": [
+    {
+      "destination": "Create",
+      "entity": "folder",
+      "intermediate": null,
+      "range": "A1:E1",
+      "source": "Get"
+    },
+    {
+      "destination": "Create",
+      "entity": "asset",
+      "intermediate": null,
+      "range": "A1:G1",
+      "source": "Get"
+    },
+    {
+      "destination": "Create Credential",
+      "entity": "asset",
+      "intermediate": null,
+      "kind": "credential",
+      "range": "A1:G1",
+      "source": "Get Credential"
+    },
+    {
+      "destination": "Create",
+      "entity": "queue",
+      "intermediate": null,
+      "range": "A1:F1",
+      "source": "Get"
+    },
+    {
+      "destination": "Uploadpackagelibrary",
+      "entity": "package",
+      "intermediate": "Downloadpackagelibrary",
+      "range": "A1:F1",
+      "source": "Get"
+    },
+    {
+      "destination": "Create",
+      "entity": "process",
+      "intermediate": null,
+      "range": "A1:G1",
+      "source": "Get"
+    },
+    {
+      "destination": "Create",
+      "entity": "trigger",
+      "intermediate": null,
+      "range": "A1:U1",
+      "source": "Get"
+    }
+  ],
+  "version": "orchestrator-manager-2.6.2"
+}

@@ -1,0 +1,48 @@
+{
+  "batch_size": 1000,
+  "continue_on_apply_error": true,
+  "continue_on_entity_error": true,
+  "continue_on_folder_error": true,
+  "continue_on_package_error": true,
+  "credential_asset_password_mode": "dummy",
+  "dummy_credential_password": "DummyPassword",
+  "entities": [
+    "folders",
+    "credential_stores",
+    "roles",
+    "users",
+    "machines",
+    "robots",
+    "environments",
+    "assets",
+    "queues",
+    "storage_buckets",
+    "packages",
+    "libraries",
+    "processes",
+    "calendars",
+    "triggers",
+    "webhooks",
+    "feeds",
+    "settings"
+  ],
+  "package_staging_folder": "DownloadedPackages",
+  "request_interval_ms": 250,
+  "source": {
+    "auth_mode": "direct_rest",
+    "client_id_env": "UIP_ONPREM_CLIENT_ID",
+    "client_secret_env": "UIP_ONPREM_CLIENT_SECRET",
+    "folder_paths": [],
+    "identity_url": "https://<onprem-host>/identity",
+    "orchestrator_url": "https://<onprem-host>",
+    "scope": "OR.Folders OR.Assets OR.Queues OR.Execution OR.Settings OR.Administration OR.Jobs OR.Users OR.Robots OR.Machines OR.Webhooks OR.License",
+    "tenant": "<source-onprem-tenant>",
+    "uip_extra_args": []
+  },
+  "target": {
+    "folder_paths": [],
+    "tenant": "<target-cloud-tenant>",
+    "uip_extra_args": []
+  },
+  "webhook_dummy_secret": "RotateThisWebhookSecret"
+}
