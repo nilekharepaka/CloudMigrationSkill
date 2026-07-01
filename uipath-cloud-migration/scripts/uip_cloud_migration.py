@@ -12,8 +12,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape as xml_escape
 
 
 PLAN_VERSION = "uipath-cloud-migration/v1"
@@ -46,6 +48,7 @@ APPLY_SUPPORTED_ENTITIES = {
     "queues",
     "storage_buckets",
     "packages",
+    "libraries",
     "processes",
     "calendars",
     "triggers",
@@ -119,6 +122,148 @@ def write_json(path: str | Path, payload: Any) -> None:
     with destination.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
+
+
+def xlsx_column_name(index: int) -> str:
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def xlsx_cell_ref(row: int, column: int) -> str:
+    return f"{xlsx_column_name(column)}{row}"
+
+
+def xlsx_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def xlsx_cell(row: int, column: int, value: Any, style: int = 0) -> str:
+    ref = xlsx_cell_ref(row, column)
+    style_attr = f' s="{style}"' if style else ""
+    if value is None or value == "":
+        return f'<c r="{ref}"{style_attr}/>'
+    if isinstance(value, bool):
+        return f'<c r="{ref}" t="b"{style_attr}><v>{1 if value else 0}</v></c>'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f'<c r="{ref}"{style_attr}><v>{value}</v></c>'
+    text = xml_escape(xlsx_text(value), {'"': "&quot;"})
+    preserve = ' xml:space="preserve"' if text != text.strip() else ""
+    return f'<c r="{ref}" t="inlineStr"{style_attr}><is><t{preserve}>{text}</t></is></c>'
+
+
+def xlsx_sheet_xml(rows: list[list[Any]], freeze_header: bool = True) -> str:
+    max_cols = max((len(row) for row in rows), default=1)
+    max_rows = max(len(rows), 1)
+    dimension = f"A1:{xlsx_cell_ref(max_rows, max_cols)}"
+    cols = "".join(
+        f'<col min="{idx}" max="{idx}" width="{width}" customWidth="1"/>'
+        for idx, width in enumerate([24, 18, 18, 22, 22, 18, 70, 70, 24, 24, 24, 24], start=1)
+        if idx <= max_cols
+    )
+    sheet_views = '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+    if freeze_header and rows:
+        sheet_views = (
+            '<sheetViews><sheetView workbookViewId="0">'
+            '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+            '</sheetView></sheetViews>'
+        )
+    sheet_rows = []
+    for row_index, row in enumerate(rows, start=1):
+        style = 1 if row_index == 1 else 0
+        cells = "".join(xlsx_cell(row_index, col_index, value, style) for col_index, value in enumerate(row, start=1))
+        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
+    auto_filter = f'<autoFilter ref="{dimension}"/>' if len(rows) > 1 else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<dimension ref="{dimension}"/>'
+        f'{sheet_views}'
+        '<sheetFormatPr defaultRowHeight="15"/>'
+        f'<cols>{cols}</cols>' if cols else ""
+    ) + f'<sheetData>{"".join(sheet_rows)}</sheetData>{auto_filter}</worksheet>'
+
+
+def safe_sheet_name(name: str, used: set[str]) -> str:
+    cleaned = "".join("_" if char in "[]:*?/\\'" else char for char in name).strip() or "Sheet"
+    cleaned = cleaned[:31]
+    candidate = cleaned
+    counter = 2
+    while candidate in used:
+        suffix = f" {counter}"
+        candidate = cleaned[: 31 - len(suffix)] + suffix
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def write_xlsx(path: str | Path, sheets: list[tuple[str, list[list[Any]]]]) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    used_names: set[str] = set()
+    normalized = [(safe_sheet_name(name, used_names), rows or [["No data"]]) for name, rows in sheets]
+    workbook_sheets = "".join(
+        f'<sheet name="{xml_escape(name)}" sheetId="{idx}" r:id="rId{idx}"/>'
+        for idx, (name, _) in enumerate(normalized, start=1)
+    )
+    workbook_rels = "".join(
+        f'<Relationship Id="rId{idx}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{idx}.xml"/>'
+        for idx, _ in enumerate(normalized, start=1)
+    )
+    workbook_rels += (
+        f'<Relationship Id="rId{len(normalized) + 1}" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    )
+    overrides = "".join(
+        f'<Override PartName="/xl/worksheets/sheet{idx}.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        for idx, _ in enumerate(normalized, start=1)
+    )
+    styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>
+  <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>"""
+    with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            f'{overrides}</Types>'
+        ))
+        archive.writestr("_rels/.rels", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>'
+        ))
+        archive.writestr("xl/workbook.xml", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'<sheets>{workbook_sheets}</sheets></workbook>'
+        ))
+        archive.writestr("xl/_rels/workbook.xml.rels", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{workbook_rels}</Relationships>'
+        ))
+        archive.writestr("xl/styles.xml", styles)
+        for idx, (_, rows) in enumerate(normalized, start=1):
+            archive.writestr(f"xl/worksheets/sheet{idx}.xml", xlsx_sheet_xml(rows))
 
 
 def safe_file_part(value: str) -> str:
@@ -703,6 +848,7 @@ def direct_rest_discover_entity(config: dict[str, Any], side: str, entity: str) 
         records = direct_rest_get_all(side_config, "/odata/Libraries?$orderby=Id")
         for record in records:
             record.setdefault("FolderPath", record.get("FolderName") or record.get("TenantName") or "")
+            record.setdefault("LibraryFeedScope", "Tenant")
         return records
     endpoint_by_entity = {
         "assets": "/odata/Assets?$orderby=Name",
@@ -1156,9 +1302,20 @@ def package_source_key(record: dict[str, Any]) -> str:
     return first_value(record, ["Key"]) or identity("packages", record)
 
 
+def library_source_key(record: dict[str, Any]) -> str:
+    return first_value(record, ["Key"]) or identity("libraries", record)
+
+
 def package_file_path(config: dict[str, Any], record: dict[str, Any]) -> Path:
     staging = Path(config.get("package_staging_folder", "DownloadedPackages"))
     name = safe_file_part(package_id(record) or record_name(record) or "package")
+    version = safe_file_part(package_version(record) or "unknown")
+    return staging / f"{name}.{version}.nupkg"
+
+
+def library_file_path(config: dict[str, Any], record: dict[str, Any]) -> Path:
+    staging = Path(config.get("package_staging_folder", "DownloadedPackages"))
+    name = safe_file_part(package_id(record) or record_name(record) or "library")
     version = safe_file_part(package_version(record) or "unknown")
     return staging / f"{name}.{version}.nupkg"
 
@@ -1176,12 +1333,50 @@ def package_download_endpoint(config: dict[str, Any], record: dict[str, Any]) ->
     return endpoint
 
 
+def library_download_endpoint(config: dict[str, Any], record: dict[str, Any]) -> str:
+    key = library_source_key(record)
+    if not key:
+        fail(f"Library record is missing a package key/id: {record}")
+    escaped_key = key.replace("'", "''")
+    endpoint = f"/odata/Libraries/UiPath.Server.Configuration.OData.DownloadPackage(key='{escaped_key}')"
+    source_config = config.get("source", {})
+    feed_id = first_value(record, ["FeedId", "FeedID", "feedId"]) or source_config.get("library_feed_id") or config.get("library_feed_id")
+    if feed_id not in (None, ""):
+        endpoint += "?" + urllib.parse.urlencode({"feedId": str(feed_id)})
+    return endpoint
+
+
+def library_is_host_feed(record: dict[str, Any]) -> bool:
+    if truthy(record.get("IsHostFeed")) or truthy(record.get("HostFeed")) or truthy(record.get("IsHostPackage")):
+        return True
+    tenant_marker = record.get("IsTenantPackage")
+    if tenant_marker not in (None, "") and not truthy(tenant_marker):
+        return True
+    feed_scope = first_value(record, ["FeedScope", "LibraryFeedScope", "Scope", "SourceFeedScope"]).strip().lower()
+    if feed_scope in {"host", "hostfeed", "host feed"}:
+        return True
+    feed_type = first_value(record, ["FeedType", "FeedName", "Feed"]).strip().lower()
+    return feed_type in {"host", "hostfeed", "host feed"}
+
+
 def load_package_records(config: dict[str, Any], discovery_path: str | None) -> list[dict[str, Any]]:
     if discovery_path:
         discovery = read_json(discovery_path)
     else:
         discovery = discover(config, "source")
     return list(discovery.get("entities", {}).get("packages", []))
+
+
+def load_library_records(config: dict[str, Any], discovery_path: str | None) -> list[dict[str, Any]]:
+    if discovery_path:
+        discovery = read_json(discovery_path)
+    else:
+        discovery = discover(config, "source")
+    return [
+        record
+        for record in discovery.get("entities", {}).get("libraries", [])
+        if not library_is_host_feed(record)
+    ]
 
 
 def stage_packages(config: dict[str, Any], discovery_path: str | None = None) -> dict[str, Any]:
@@ -1264,6 +1459,87 @@ def stage_packages(config: dict[str, Any], discovery_path: str | None = None) ->
     return report
 
 
+def stage_libraries(config: dict[str, Any], discovery_path: str | None = None) -> dict[str, Any]:
+    libraries = load_library_records(config, discovery_path)
+    source_config = config.get("source", {})
+    report: dict[str, Any] = {
+        "staged_at": now_utc(),
+        "package_staging_folder": config.get("package_staging_folder", "DownloadedPackages"),
+        "libraries": [],
+        "failed_libraries": [],
+        "skipped_libraries": [],
+    }
+    if not libraries:
+        return report
+
+    if direct_rest_enabled(source_config):
+        for record in libraries:
+            destination = library_file_path(config, record)
+            endpoint = library_download_endpoint(config, record)
+            if destination.exists() and destination.stat().st_size > 0:
+                report["libraries"].append({
+                    "identity": identity("libraries", record),
+                    "source_key": library_source_key(record),
+                    "path": str(destination),
+                    "bytes": destination.stat().st_size,
+                    "status": "already_staged",
+                })
+                continue
+            try:
+                direct_rest_download_file(source_config, endpoint, destination)
+            except SystemExit as exc:
+                if not config.get("continue_on_library_error", config.get("continue_on_package_error", True)):
+                    raise
+                report["failed_libraries"].append({
+                    "identity": identity("libraries", record),
+                    "source_key": library_source_key(record),
+                    "path": str(destination),
+                    "error": str(exc),
+                })
+                continue
+            report["libraries"].append({
+                "identity": identity("libraries", record),
+                "source_key": library_source_key(record),
+                "path": str(destination),
+                "bytes": destination.stat().st_size if destination.exists() else 0,
+            })
+        return report
+
+    maybe_switch_tenant(config, "source")
+    for record in libraries:
+        destination = library_file_path(config, record)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        key = library_source_key(record)
+        if destination.exists() and destination.stat().st_size > 0:
+            report["libraries"].append({
+                "identity": identity("libraries", record),
+                "source_key": key,
+                "path": str(destination),
+                "bytes": destination.stat().st_size,
+                "status": "already_staged",
+            })
+            continue
+        try:
+            run_command(["uip", "resource", "libraries", "download", key, "--destination", str(destination), "--output", "json"], capture=True)
+        except SystemExit as exc:
+            if not config.get("continue_on_library_error", config.get("continue_on_package_error", True)):
+                raise
+            report["failed_libraries"].append({
+                "identity": identity("libraries", record),
+                "source_key": key,
+                "path": str(destination),
+                "error": str(exc),
+            })
+            continue
+        report["libraries"].append({
+            "identity": identity("libraries", record),
+            "source_key": key,
+            "path": str(destination),
+            "bytes": destination.stat().st_size if destination.exists() else 0,
+        })
+    return report
+
+
 def build_indexes(records: list[dict[str, Any]], entity: str) -> dict[str, dict[str, Any]]:
     result = {}
     for record in records:
@@ -1303,6 +1579,10 @@ def source_to_target_action(config: dict[str, Any], entity: str, key: str, recor
     if entity == "packages":
         action["operation"] = "download_upload"
         action["package_staging_folder"] = config.get("package_staging_folder", "DownloadedPackages")
+    if entity == "libraries":
+        action["operation"] = "download_upload"
+        action["package_staging_folder"] = config.get("package_staging_folder", "DownloadedPackages")
+        action["notes"].append("Tenant feed library will be downloaded as .nupkg and uploaded to the target tenant feed. Host feed libraries are skipped during planning.")
     if entity == "assets" and is_credential_asset(record):
         action["credential_asset_password_mode"] = "dummy"
         action["dummy_password"] = config.get("dummy_credential_password", "DummyPassword")
@@ -1350,6 +1630,9 @@ def make_plan(config: dict[str, Any], source_discovery: str | None = None, targe
             if entity == "roles" and truthy(record.get("IsStatic")):
                 skipped.append({"entity": entity, "identity": key, "reason": "built_in_static_role"})
                 continue
+            if entity == "libraries" and library_is_host_feed(record):
+                skipped.append({"entity": entity, "identity": key, "reason": "host_feed_library"})
+                continue
             if key in target_index:
                 skipped.append({"entity": entity, "identity": key, "reason": "already_exists"})
                 continue
@@ -1380,6 +1663,123 @@ def make_plan(config: dict[str, Any], source_discovery: str | None = None, targe
         "source_summary": {entity: len(source["entities"].get(entity, [])) for entity in selected_entities(config)},
         "target_summary": {entity: len(target["entities"].get(entity, [])) for entity in selected_entities(config)},
     }
+
+
+def action_status(action: dict[str, Any]) -> str:
+    operation = action.get("operation", "")
+    entity = action.get("entity", "")
+    if operation == "manual_review":
+        return "Manual Review"
+    if entity in APPLY_SUPPORTED_ENTITIES:
+        return "Auto Apply Supported"
+    return "Manual Review"
+
+
+def summarize_notes(action: dict[str, Any]) -> str:
+    notes = action.get("notes") or []
+    if isinstance(notes, list):
+        return " | ".join(str(note) for note in notes)
+    return str(notes)
+
+
+def make_analysis_report_rows(config: dict[str, Any], plan: dict[str, Any]) -> list[tuple[str, list[list[Any]]]]:
+    actions = plan.get("actions", [])
+    skipped = plan.get("skipped", [])
+    manual = plan.get("manual_remediation", [])
+    entities = plan.get("entities", selected_entities(config))
+    source_summary = plan.get("source_summary", {})
+    target_summary = plan.get("target_summary", {})
+    action_counts: dict[str, int] = {entity: 0 for entity in entities}
+    manual_counts: dict[str, int] = {entity: 0 for entity in entities}
+    for action in actions:
+        entity = str(action.get("entity", ""))
+        action_counts[entity] = action_counts.get(entity, 0) + 1
+        if action.get("operation") == "manual_review":
+            manual_counts[entity] = manual_counts.get(entity, 0) + 1
+    skipped_counts: dict[str, int] = {entity: 0 for entity in entities}
+    for item in skipped:
+        entity = str(item.get("entity", ""))
+        skipped_counts[entity] = skipped_counts.get(entity, 0) + 1
+
+    auto_supported = [action for action in actions if action_status(action) == "Auto Apply Supported"]
+    manual_actions = [action for action in actions if action_status(action) != "Auto Apply Supported"]
+
+    summary_rows = [
+        ["Metric", "Value"],
+        ["Generated At", plan.get("generated_at", "")],
+        ["Source Tenant", config.get("source", {}).get("tenant", "")],
+        ["Target Tenant", config.get("target", {}).get("tenant", "")],
+        ["Entities Selected", len(entities)],
+        ["Source Records Discovered", sum(int(source_summary.get(entity, 0) or 0) for entity in entities)],
+        ["Target Records Discovered", sum(int(target_summary.get(entity, 0) or 0) for entity in entities)],
+        ["Planned Actions", len(actions)],
+        ["Auto Apply Supported Actions", len(auto_supported)],
+        ["Manual Review Actions", len(manual_actions)],
+        ["Skipped Existing/Built-in Items", len(skipped)],
+        ["Manual Remediation Notes", len(manual)],
+        ["Package/Library Files Downloaded", 0],
+        ["Approval Required Before Package/Library Download", "Yes"],
+        ["Approval Required Before Apply", "Yes"],
+    ]
+
+    entity_rows = [["Entity", "Source Count", "Target Count", "Planned Actions", "Auto Supported", "Manual Review", "Skipped", "Apply Support"]]
+    for entity in entities:
+        entity_actions = [action for action in actions if action.get("entity") == entity]
+        auto_count = sum(1 for action in entity_actions if action_status(action) == "Auto Apply Supported")
+        manual_count = len(entity_actions) - auto_count
+        entity_rows.append([
+            entity,
+            source_summary.get(entity, 0),
+            target_summary.get(entity, 0),
+            action_counts.get(entity, 0),
+            auto_count,
+            manual_count,
+            skipped_counts.get(entity, 0),
+            "Auto" if entity in APPLY_SUPPORTED_ENTITIES else "Manual Review",
+        ])
+
+    action_rows = [["Order", "Entity", "Identity", "Operation", "Status", "Folder", "Notes"]]
+    for index, action in enumerate(actions, start=1):
+        action_rows.append([
+            index,
+            action.get("entity", ""),
+            action.get("identity", ""),
+            action.get("operation", ""),
+            action_status(action),
+            record_folder(action.get("source_record", {})),
+            summarize_notes(action),
+        ])
+
+    skipped_rows = [["Entity", "Identity", "Reason"]]
+    skipped_rows.extend([[item.get("entity", ""), item.get("identity", ""), item.get("reason", "")] for item in skipped])
+
+    manual_rows = [["Entity", "Identity", "Reason", "Required Action"]]
+    manual_rows.extend([
+        [item.get("entity", ""), item.get("identity", ""), item.get("reason", ""), item.get("required_action", "")]
+        for item in manual
+    ])
+
+    runbook_rows = [
+        ["Step", "Command / Decision", "Purpose"],
+        ["1", "Review this Analysis Report workbook", "Confirm which entities will be migrated and which require manual handling."],
+        ["2", "Review migration-plan.json", "Keep this machine-readable plan with the workbook. It is the exact plan that validate/apply will use."],
+        ["3", "If packages or libraries are included, run stage-packages/stage-libraries only after approval", "Downloads .nupkg artifact files into the configured staging folder."],
+        ["4", "Run validate after package staging", "Checks staged package files and unsupported actions before apply."],
+        ["5", "Run apply only after explicit approval", "Creates/uploads supported entities in the target tenant."],
+    ]
+
+    return [
+        ("Summary", summary_rows),
+        ("Entity Summary", entity_rows),
+        ("Planned Actions", action_rows),
+        ("Skipped", skipped_rows),
+        ("Manual Remediation", manual_rows),
+        ("Approval Runbook", runbook_rows),
+    ]
+
+
+def write_analysis_report(config: dict[str, Any], plan: dict[str, Any], xlsx_path: str | Path) -> None:
+    write_xlsx(xlsx_path, make_analysis_report_rows(config, plan))
 
 
 def action_command(action: dict[str, Any], config: dict[str, Any]) -> list[list[str]]:
@@ -1462,6 +1862,12 @@ def action_command(action: dict[str, Any], config: dict[str, Any]) -> list[list[
     if entity == "packages":
         destination = str(package_file_path(config, record))
         return [["uip", "or", "packages", "upload", destination, "--output", "json"]]
+    if entity == "libraries":
+        destination = str(library_file_path(config, record))
+        command = ["uip", "resource", "libraries", "upload", "--file", destination, "--output", "json"]
+        target_config = config.get("target", {})
+        append_if_value(command, "--feed-id", target_config.get("library_feed_id") or config.get("library_feed_id"))
+        return [command]
     if entity == "processes":
         package_key = first_value(record, ["PackageId", "PackageKey", "ProcessKey"])
         version = first_value(record, ["PackageVersion", "Version"])
@@ -1536,6 +1942,12 @@ def validate_plan(config: dict[str, Any], plan: dict[str, Any]) -> list[str]:
                 errors.append(f"Package file is not staged for {action.get('identity')}: {package_path}")
             elif package_path.stat().st_size == 0:
                 errors.append(f"Package file is empty for {action.get('identity')}: {package_path}")
+        if entity == "libraries":
+            library_path = library_file_path(config, action.get("source_record", {}))
+            if not library_path.exists():
+                errors.append(f"Library file is not staged for {action.get('identity')}: {library_path}")
+            elif library_path.stat().st_size == 0:
+                errors.append(f"Library file is empty for {action.get('identity')}: {library_path}")
     return errors
 
 
@@ -1592,11 +2004,23 @@ def build_parser() -> argparse.ArgumentParser:
     stage_parser.add_argument("--discovery", help="Optional source discovery JSON to reuse instead of discovering again.")
     stage_parser.add_argument("--out")
 
+    stage_libraries_parser = sub.add_parser("stage-libraries", help="Download source tenant feed library .nupkg files into the staging folder.")
+    stage_libraries_parser.add_argument("--config", required=True)
+    stage_libraries_parser.add_argument("--discovery", help="Optional source discovery JSON to reuse instead of discovering again.")
+    stage_libraries_parser.add_argument("--out")
+
     plan_parser = sub.add_parser("plan", help="Generate an ordered migration plan.")
     plan_parser.add_argument("--config", required=True)
     plan_parser.add_argument("--out", required=True)
     plan_parser.add_argument("--source-discovery", help="Optional source discovery JSON to reuse instead of discovering again.")
     plan_parser.add_argument("--target-discovery", help="Optional target discovery JSON to reuse instead of discovering again.")
+
+    analyze_parser = sub.add_parser("analyze", help="Create a pre-migration Excel analysis report and matching JSON plan without downloading packages or applying changes.")
+    analyze_parser.add_argument("--config", required=True)
+    analyze_parser.add_argument("--out", default="migration-analysis.xlsx", help="Excel analysis report path.")
+    analyze_parser.add_argument("--plan-out", default="migration-plan.json", help="Machine-readable JSON plan path.")
+    analyze_parser.add_argument("--source-discovery", help="Optional source discovery JSON to reuse instead of discovering again.")
+    analyze_parser.add_argument("--target-discovery", help="Optional target discovery JSON to reuse instead of discovering again.")
 
     apply_parser = sub.add_parser("apply", help="Apply an existing migration plan.")
     apply_parser.add_argument("--config", required=True)
@@ -1632,10 +2056,25 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    if args.command == "stage-libraries":
+        payload = stage_libraries(config, args.discovery)
+        if args.out:
+            write_json(args.out, payload)
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     if args.command == "plan":
         payload = make_plan(config, args.source_discovery, args.target_discovery)
         write_json(args.out, payload)
         print(f"Wrote migration plan: {args.out}")
+        return 0
+    if args.command == "analyze":
+        payload = make_plan(config, args.source_discovery, args.target_discovery)
+        write_json(args.plan_out, payload)
+        write_analysis_report(config, payload, args.out)
+        print(f"Wrote migration plan: {args.plan_out}")
+        print(f"Wrote analysis report: {args.out}")
+        print("No package files were downloaded and no target changes were applied.")
         return 0
     if args.command == "validate":
         errors = validate_plan(config, read_json(args.plan))

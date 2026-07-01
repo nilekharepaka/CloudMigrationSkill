@@ -1,0 +1,24 @@
+# Operator-local migration configuration and secrets-adjacent run artifacts
+migration.local.json
+migration*.local.json
+
+# Discovery, planning, validation, and apply outputs
+*-discovery*.json
+*discovery*.json
+*migration-plan*.json
+*plan*.json
+*apply*.json
+*stage-report*.json
+*analysis*.xlsx
+*analysis*.json
+*migration-report*.md
+*not-migrated*.csv
+*skipped*.csv
+
+# Package staging/download folders
+DownloadedPackages/
+DownloadedPackages*/
+
+# Python cache
+__pycache__/
+*.py[cod]
