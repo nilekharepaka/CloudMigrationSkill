@@ -13,6 +13,7 @@
     "<source-credential-store-name>": "<target-credential-store-key-guid>"
   },
   "dummy_credential_password": "DummyPassword",
+  "artifact_dir": ".migration-state",
   "entities": [
     "folders",
     "credential_stores",

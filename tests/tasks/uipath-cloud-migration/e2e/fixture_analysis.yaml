@@ -1,0 +1,119 @@
+task_id: skill-cloud-migration-fixture-analysis
+description: >
+  Skill-guided evaluation: agent uses the uipath-cloud-migration skill to run
+  a full assessment-only analysis against local fixture data (no live tenant,
+  no network access), and confirms the mandatory report gate holds. Verifies
+  the skill drives config creation, analysis, and correct disposition/
+  readiness output, and that it never attempts apply for an assessment-only,
+  no-target run.
+tags: [uipath-cloud-migration, e2e, mode:build, lifecycle:generate]
+
+sandbox:
+  driver: docker
+  python: {}
+
+initial_prompt: |
+  Run a uipath-cloud-migration assessment using local fixture data instead of
+  a live tenant, so this runs with no network access.
+
+  Step 1 — create these two files exactly, byte for byte:
+
+  `_fixtures/source/folders.json`:
+  [
+    {"Id": 1, "Name": "Shared", "FullyQualifiedName": "Shared"},
+    {"Id": 2, "Name": "Finance", "FullyQualifiedName": "Finance"}
+  ]
+
+  `_fixtures/source/roles.json`:
+  [
+    {"Id": 1, "Name": "Administrator", "Type": "Tenant", "IsStatic": true},
+    {"Id": 2, "Name": "Finance Reviewer", "Type": "Folder", "IsStatic": false,
+     "Permissions": [{"Name": "Queues.View"}, {"Name": "Jobs.View"}]}
+  ]
+
+  Step 2 — create a migration config at `migration.local.json` with:
+  - migration_mode: "assessment_only"
+  - fixture_dir: "_fixtures"
+  - source.auth_mode: "direct_rest"
+  - source.tenant: "FixtureTenant"
+  - source.orchestrator_url: "https://fixture.invalid"
+  - source.identity_url: "https://fixture.invalid/identity"
+  - target.mode: "none"
+  - target.tenant: ""
+  - entities: ["folders", "roles"]
+
+  (fixture_dir makes discovery read the JSON files above directly — no
+  network call is made, so the placeholder URLs are never contacted.)
+
+  Step 3 — run the skill's analysis step against that config to produce the
+  plan and both reports (workbook and HTML).
+
+  This is assessment only. Do not attempt to apply anything.
+
+success_criteria:
+  - type: skill_triggered
+    description: "Agent invoked the uipath-cloud-migration skill"
+    skill_name: "uipath-cloud-migration"
+    expected_skill: "uipath-cloud-migration"
+    weight: 2.0
+    pass_threshold: 1.0
+
+  - type: file_exists
+    description: "Migration config was created"
+    path: "migration.local.json"
+    weight: 1.5
+    pass_threshold: 1.0
+
+  - type: file_contains
+    description: "Config uses fixture_dir and never inlines a raw client secret"
+    path: "migration.local.json"
+    includes:
+      - '"fixture_dir"'
+      - '"auth_mode": "direct_rest"'
+    excludes:
+      - '"client_secret":'
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - type: command_executed
+    description: "Agent ran the analyze step"
+    tool_name: "Bash"
+    command_pattern: 'uip_cloud_migration\.py\s+analyze'
+    min_count: 1
+    weight: 2.0
+    pass_threshold: 1.0
+
+  - type: file_exists
+    description: "Plan file was produced"
+    path: "migration-plan.json"
+    weight: 1.5
+    pass_threshold: 1.0
+
+  - type: file_contains
+    description: "Plan carries the readiness findings and report linkage this engine produces"
+    path: "migration-plan.json"
+    includes:
+      - '"readiness"'
+      - '"analysis_report"'
+      - '"disposition"'
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - type: file_exists
+    description: "Excel analysis report was produced"
+    path: "migration-analysis.xlsx"
+    weight: 1.0
+    pass_threshold: 1.0
+
+  - type: file_exists
+    description: "Companion HTML analysis report was produced"
+    path: "migration-analysis.html"
+    weight: 1.0
+    pass_threshold: 1.0
+
+  - type: command_not_executed
+    description: "Agent did not attempt apply for this assessment-only, no-target run"
+    tool_name: "Bash"
+    command_pattern: 'uip_cloud_migration\.py\s+apply'
+    weight: 3.0
+    pass_threshold: 1.0

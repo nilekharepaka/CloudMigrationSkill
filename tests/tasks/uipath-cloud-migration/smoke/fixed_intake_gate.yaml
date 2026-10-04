@@ -1,0 +1,34 @@
+task_id: skill-cloud-migration-fixed-intake-gate
+description: >
+  Skill-guided evaluation: given a vague, detail-free migration request, the
+  agent must run the fixed intake questionnaire rather than acting on
+  assumptions. No source URL, tenant, or scope is supplied, so nothing in the
+  migration engine (config init, discovery, analysis, staging, apply) has
+  enough information to run correctly. Tests whether the skill's "ask before
+  acting" gate holds under a request that invites shortcuts ("just get it
+  done").
+tags: [uipath-cloud-migration, smoke, mode:build, lifecycle:discover]
+
+sandbox:
+  driver: docker
+  python: {}
+
+initial_prompt: |
+  I want to move my On-Prem Orchestrator over to Automation Cloud. Just get it done.
+
+  Do not run anything against a live system yet.
+
+success_criteria:
+  - type: skill_triggered
+    description: "Agent invoked the uipath-cloud-migration skill"
+    skill_name: "uipath-cloud-migration"
+    expected_skill: "uipath-cloud-migration"
+    weight: 2.0
+    pass_threshold: 1.0
+
+  - type: command_not_executed
+    description: "Agent did not run any engine subcommand before intake was complete"
+    tool_name: "Bash"
+    command_pattern: 'uip_cloud_migration\.py\s+(init-config|discover|analyze|plan|stage-packages|stage-libraries|validate|apply)'
+    weight: 3.0
+    pass_threshold: 1.0

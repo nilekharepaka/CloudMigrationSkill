@@ -1,0 +1,613 @@
+<title>Orchestrator Migration Intake</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground:#f7f8fa; --surface:#ffffff; --surface-2:#eef1f6;
+    --ink:#14181f; --muted:#5b6472; --line:#dde2e9;
+    --accent:#1f5fbf; --accent-soft:#e7effb;
+    --warn:#b26a00; --warn-soft:#fdf4e3;
+    --stop:#b3261e; --stop-soft:#fdeceb;
+    --ok:#1c6b47; --ok-soft:#e8f4ee;
+    --shadow:0 1px 2px rgba(20,24,31,.06), 0 8px 24px rgba(20,24,31,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0e1116; --surface:#161b22; --surface-2:#1d242e;
+      --ink:#e6eaf0; --muted:#98a2b3; --line:#263040;
+      --accent:#6ba4ff; --accent-soft:#132132;
+      --warn:#e0a030; --warn-soft:#2a2010;
+      --stop:#ff6b5e; --stop-soft:#2c1512;
+      --ok:#4fd18b; --ok-soft:#11241b;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0e1116; --surface:#161b22; --surface-2:#1d242e;
+    --ink:#e6eaf0; --muted:#98a2b3; --line:#263040;
+    --accent:#6ba4ff; --accent-soft:#132132;
+    --warn:#e0a030; --warn-soft:#2a2010;
+    --stop:#ff6b5e; --stop-soft:#2c1512;
+    --ok:#4fd18b; --ok-soft:#11241b;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font:400 15px/1.55 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:740px; margin:0 auto; padding:40px 20px 340px}
+
+  header{display:flex; flex-direction:column; gap:10px}
+  .eyebrow{
+    font:500 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+  }
+  h1{margin:0; font-size:29px; font-weight:600; letter-spacing:-.02em; text-wrap:balance}
+  .lede{margin:0; color:var(--muted); max-width:64ch}
+
+  .notice{
+    margin:24px 0 0; padding:14px 16px; border-radius:10px; display:flex; gap:12px; align-items:flex-start;
+    background:var(--warn-soft); border:1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+  }
+  .notice .bar{width:3px; align-self:stretch; border-radius:2px; background:var(--warn); flex:none}
+  .notice p{margin:0; font-size:13.5px}
+  .notice strong{color:var(--warn)}
+
+  .stage{
+    border:1px solid var(--line); border-radius:12px; background:var(--surface);
+    padding:22px; margin:26px 0 0; box-shadow:var(--shadow); position:relative;
+  }
+  .stage.locked{opacity:.55}
+  .stage.locked .body{pointer-events:none}
+  .stage-head{display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap}
+  .step{
+    font:500 11px/1 "IBM Plex Mono", monospace;
+    background:var(--accent-soft); color:var(--accent);
+    border:1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    border-radius:5px; padding:4px 6px;
+  }
+  .stage-title{font-weight:600; font-size:16px; letter-spacing:-.01em; margin:0}
+  .stage-note{margin:0 0 18px; font-size:13px; color:var(--muted); max-width:62ch}
+
+  .grid{display:grid; gap:18px}
+  .row2{display:grid; gap:18px; grid-template-columns:1fr 1fr}
+  @media (max-width:580px){ .row2{grid-template-columns:1fr} }
+
+  label{display:flex; flex-direction:column; gap:6px}
+  .lbl{font-size:13px; font-weight:500; display:flex; gap:7px; align-items:baseline}
+  .req{color:var(--stop); font-size:11px; font-weight:500}
+  .hint{font-size:12.5px; color:var(--muted); margin:0}
+
+  input[type=text], input[type=url], select, textarea{
+    font:400 14px/1.45 "IBM Plex Mono", ui-monospace, monospace;
+    color:var(--ink); background:var(--surface-2);
+    border:1px solid var(--line); border-radius:8px; padding:9px 11px; width:100%;
+  }
+  select{font-family:"IBM Plex Sans", sans-serif}
+  textarea{resize:vertical; min-height:62px}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  input[aria-invalid="true"]{border-color:var(--stop); background:var(--stop-soft)}
+  .field-err{font-size:12px; color:var(--stop)}
+
+  .callout{padding:13px 15px; border-radius:10px; font-size:13.5px; display:none}
+  .callout.on{display:block}
+  .callout h3{margin:0 0 6px; font-size:13.5px}
+  .callout code{
+    display:block; margin-top:8px; padding:9px 10px; border-radius:6px;
+    background:var(--surface); border:1px solid var(--line);
+    font:400 12.5px/1.6 "IBM Plex Mono", monospace; overflow-x:auto; white-space:pre-wrap;
+  }
+  .callout.stopc{background:var(--stop-soft); border:1px solid color-mix(in srgb, var(--stop) 36%, transparent)}
+  .callout.stopc h3{color:var(--stop)}
+  .callout.okc{background:var(--ok-soft); border:1px solid color-mix(in srgb, var(--ok) 36%, transparent)}
+  .callout.okc h3{color:var(--ok)}
+
+  .tenants{display:flex; flex-direction:column; gap:2px; border:1px solid var(--line); border-radius:8px; padding:6px; background:var(--surface-2)}
+  .tenants.empty{padding:14px; color:var(--muted); font-size:13px; text-align:center}
+  .trow{display:flex; align-items:center; gap:10px; padding:8px 9px; border-radius:6px}
+  .trow:hover{background:var(--surface)}
+  .trow input{width:16px; height:16px; accent-color:var(--accent); flex:none; margin:0}
+  .trow .tname{font:500 13.5px/1 "IBM Plex Mono", monospace}
+  .trow .tmeta{font-size:12px; color:var(--muted); margin-left:auto}
+  .tenants-bar{display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap}
+  .tenants-bar .count{font-size:12.5px; color:var(--muted); margin-left:auto}
+
+  .action{
+    margin-top:6px; padding-top:18px; border-top:1px solid var(--line);
+    display:flex; flex-direction:column; gap:8px; align-items:flex-start;
+  }
+  .action button{padding:11px 18px; font-size:14px}
+  .action-note{margin:0; font-size:12.5px; color:var(--muted); max-width:62ch}
+
+  .panel{position:fixed; left:0; right:0; bottom:0; z-index:5; background:var(--surface); border-top:1px solid var(--line); box-shadow:0 -6px 24px rgba(0,0,0,.10)}
+  .panel-in{max-width:740px; margin:0 auto; padding:14px 20px 18px}
+  .panel-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .chip{font:500 11px/1 "IBM Plex Mono", monospace; letter-spacing:.06em; text-transform:uppercase; padding:5px 8px; border-radius:5px; border:1px solid}
+  .chip.ready{color:var(--ok); background:var(--ok-soft); border-color:color-mix(in srgb, var(--ok) 40%, transparent)}
+  .chip.wait{color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb, var(--warn) 40%, transparent)}
+  .spacer{flex:1}
+  button{font:500 13px/1 "IBM Plex Sans", sans-serif; cursor:pointer; background:var(--accent); color:#fff; border:1px solid transparent; border-radius:8px; padding:9px 14px}
+  button.ghost{background:transparent; color:var(--accent); border-color:color-mix(in srgb, var(--accent) 34%, transparent)}
+  button.small{padding:6px 10px; font-size:12px}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  pre{margin:12px 0 0; padding:12px 13px; border-radius:8px; max-height:180px; overflow:auto; background:var(--surface-2); border:1px solid var(--line); font:400 12px/1.6 "IBM Plex Mono", monospace}
+  .missing{margin:10px 0 0; font-size:12.5px; color:var(--muted)}
+  .missing b{color:var(--warn); font-weight:500}
+  @media (prefers-reduced-motion:no-preference){
+    button{transition:filter .15s ease}
+    button:hover:not(:disabled){filter:brightness(1.08)}
+    .stage{transition:opacity .2s ease}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">On-Premises → Automation Cloud</span>
+    <h1>Orchestrator migration intake</h1>
+    <p class="lede">Two steps. Establish the connection first, then pick tenants from what that connection actually
+      returns — rather than typing names from memory and finding out later they were wrong.</p>
+  </header>
+
+  <div class="notice">
+    <span class="bar" aria-hidden="true"></span>
+    <p><strong>Never enter a client secret on this page.</strong> This form asks only for the <em>names</em> of the
+      environment variables holding your External Application credentials. You set the values in your own shell — they
+      are never typed here, never written to the configuration, and never leave your machine.</p>
+  </div>
+
+  <!-- ------------------------------------------------------ stage 1 -->
+  <section class="stage">
+    <div class="stage-head"><span class="step">01</span><h2 class="stage-title">Connection and authorisation</h2></div>
+    <p class="stage-note">Everything needed to obtain a token. No tenant yet — the token is issued at host level, so
+      tenants can be listed once this works.</p>
+    <div class="body grid">
+      <label>
+        <span class="lbl">Orchestrator base URL <span class="req">required</span></span>
+        <input type="text" id="orchUrl" placeholder="https://uipath.contoso.local" autocomplete="off">
+        <p class="hint">Host only — no <code>/odata</code> and no tenant path.</p>
+        <span class="field-err" id="orchUrlErr"></span>
+      </label>
+      <div class="row2">
+        <label>
+          <span class="lbl">Identity URL</span>
+          <input type="text" id="identityUrl" placeholder="derived from the base URL" autocomplete="off">
+          <p class="hint">Blank means <code>&lt;base&gt;/identity</code>.</p>
+        </label>
+        <label>
+          <span class="lbl">Deployment</span>
+          <select id="deployment">
+            <option value="msi_standalone">MSI standalone</option>
+            <option value="automation_suite">Automation Suite</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        <span class="lbl">Does an External Application already exist? <span class="req">required</span></span>
+        <select id="hasApp">
+          <option value="yes">Yes — it exists</option>
+          <option value="no">No — it still needs creating</option>
+        </select>
+      </label>
+      <div class="callout stopc" id="appBlocker">
+        <h3>Create the External Application first</h3>
+        Discovery authenticates with client credentials, so nothing can run until it exists. Create one in the source
+        Orchestrator with these scopes, then return here. <code>OR.Folders OR.Assets OR.Queues OR.Execution OR.Settings OR.Administration OR.Jobs OR.Users OR.Robots OR.Machines OR.Webhooks OR.License</code>
+      </div>
+      <label>
+        <span class="lbl">Scopes it holds <span class="req">required</span></span>
+        <textarea id="scopes">OR.Folders OR.Assets OR.Queues OR.Execution OR.Settings OR.Administration OR.Jobs OR.Users OR.Robots OR.Machines OR.Webhooks OR.License</textarea>
+        <p class="hint">Trim to what it actually holds. Listing tenants in step 2 needs <code>OR.Administration</code>;
+          a missing scope silently empties every entity family it covers.</p>
+      </label>
+      <div class="row2">
+        <label>
+          <span class="lbl">Variable name — client ID</span>
+          <input type="text" id="idEnv" value="UIP_ONPREM_CLIENT_ID" autocomplete="off">
+        </label>
+        <label>
+          <span class="lbl">Variable name — client secret</span>
+          <input type="text" id="secretEnv" value="UIP_ONPREM_CLIENT_SECRET" autocomplete="off">
+        </label>
+      </div>
+
+      <div class="action">
+        <button type="button" id="probeBtn2">Copy step 1 &amp; send it to me</button>
+        <p class="action-note">I run the connection check with it and hand you back the result to paste into step 2.
+          Nothing on this page can reach your network, so this hand-off is how the check actually happens.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------ stage 2 -->
+  <section class="stage locked" id="stage2">
+    <div class="stage-head">
+      <span class="step">02</span><h2 class="stage-title">Tenants and scope</h2>
+      <span class="chip wait" id="authChip">Awaiting authentication</span>
+    </div>
+    <p class="stage-note">Run the connection check with the step 1 details, then paste its result below. The tenants it
+      found appear here as a list you choose from.</p>
+    <div class="body grid">
+      <label>
+        <span class="lbl">Connection check result</span>
+        <textarea id="probePaste" placeholder='Paste the probe JSON here, e.g. {"authenticated": true, "tenants": [{"name": "Default"}]}'></textarea>
+        <p class="hint">Ask for the connection check and paste what comes back. If tenant listing was refused, add
+          tenant names by hand below instead.</p>
+      </label>
+
+      <div class="callout okc" id="authOk"><h3>Connected</h3><span id="authOkText"></span></div>
+      <div class="callout stopc" id="authBad"><h3>Not connected</h3><span id="authBadText"></span></div>
+
+      <div>
+        <span class="lbl" style="margin-bottom:8px">Tenants to migrate <span class="req">required</span></span>
+        <div class="tenants-bar">
+          <button type="button" class="ghost small" id="allBtn">Select all</button>
+          <button type="button" class="ghost small" id="noneBtn">Clear</button>
+          <input type="text" id="manualTenant" placeholder="add a tenant by name" style="max-width:210px">
+          <button type="button" class="ghost small" id="addBtn">Add</button>
+          <span class="count" id="tCount">none selected</span>
+        </div>
+        <div class="tenants empty" id="tenantList">No tenants yet — paste a connection check result, or add one by name.</div>
+        <p class="hint" style="margin-top:8px">Each selected tenant is analysed as its own run, producing its own
+          report. One configuration per tenant is generated below.</p>
+      </div>
+
+      <div class="row2">
+        <label>
+          <span class="lbl">Orchestrator version <span class="req">required</span></span>
+          <input type="text" id="version" placeholder="2023.4" autocomplete="off">
+          <p class="hint">2018.4 and 2019.4 need Organization Units enabled.</p>
+        </label>
+        <label>
+          <span class="lbl">Scope of this migration <span class="req">required</span></span>
+          <select id="mode">
+            <option value="assessment_only">Assessment only — read-only report</option>
+            <option value="lift_and_shift">Lift and shift — everything</option>
+            <option value="folder_subset">Specific folders only</option>
+            <option value="entity_subset">Specific entity families only</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint" id="modeHint"></p>
+
+      <label id="foldersWrap">
+        <span class="lbl">Folder paths <span class="req" id="foldersReq" hidden>required</span></span>
+        <textarea id="folders" placeholder="Finance/AP&#10;Finance/AR"></textarea>
+        <p class="hint">One fully-qualified path per line, applied to every selected tenant. Blank means all folders.</p>
+      </label>
+      <label id="familiesWrap">
+        <span class="lbl">Entity families <span class="req" id="familiesReq" hidden>required</span></span>
+        <textarea id="families" placeholder="folders, assets, queues, packages, processes, triggers"></textarea>
+        <p class="hint">Comma-separated. Blank means all twenty supported families.</p>
+      </label>
+
+      <div class="action">
+        <button type="button" id="copyBtn2" disabled>Copy configuration &amp; send it to me</button>
+        <p class="action-note" id="finalNote">Finish the required fields above to enable this.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="panel">
+  <div class="panel-in">
+    <div class="panel-head">
+      <span class="chip wait" id="chip">Step 1 incomplete</span>
+      <span class="spacer"></span>
+      <button class="ghost" id="probeBtn" type="button">Copy step 1</button>
+      <button id="copyBtn" type="button" disabled>Copy configuration</button>
+    </div>
+    <p class="missing" id="missing"></p>
+    <pre id="out" aria-live="polite">Complete step 1, then copy the connection check.</pre>
+  </div>
+</div>
+
+<script>
+  var ALL_FAMILIES = ["folders","credential_stores","roles","users","machines","robots","environments",
+    "assets","queues","storage_buckets","packages","libraries","processes","calendars","triggers",
+    "webhooks","feeds","settings","bucket_files","queue_items"];
+
+  // Replaced on republish when a connection check has already run.
+  var SEEDED_TENANTS = [];
+
+  var tenants = [];        // [{name, meta, checked}]
+  var authState = null;    // null | {ok:bool, text:string}
+
+  function el(id){ return document.getElementById(id); }
+  function trimSlash(v){ return v.replace(/\/+$/, ""); }
+  function validUrl(v){
+    if(!v) return false;
+    try { var u = new URL(v); return u.protocol === "http:" || u.protocol === "https:"; }
+    catch(e){ return false; }
+  }
+  function lines(v){ return v.split(/[\n,]/).map(function(s){return s.trim();}).filter(Boolean); }
+
+  function s1(){
+    var base = trimSlash(el("orchUrl").value.trim());
+    return {
+      base: base,
+      identity: trimSlash(el("identityUrl").value.trim()) || (base ? base + "/identity" : ""),
+      deployment: el("deployment").value,
+      hasApp: el("hasApp").value === "yes",
+      scopes: el("scopes").value.trim().replace(/\s+/g," "),
+      idEnv: el("idEnv").value.trim(),
+      secretEnv: el("secretEnv").value.trim()
+    };
+  }
+
+  function s1Problems(a){
+    var out = [];
+    if(!validUrl(a.base)) out.push("Orchestrator base URL");
+    if(!a.hasApp) out.push("an External Application");
+    if(!a.scopes) out.push("External Application scopes");
+    if(!a.idEnv || !a.secretEnv) out.push("credential variable names");
+    return out;
+  }
+
+  // Config used purely for the connection check: no tenant, no scope decisions.
+  function probeConfig(a){
+    return {
+      migration_mode: "assessment_only",
+      source: {
+        deployment_type: a.deployment,
+        auth_mode: "direct_rest",
+        orchestrator_url: a.base,
+        identity_url: a.identity,
+        tenant: "",
+        client_id_env: a.idEnv,
+        client_secret_env: a.secretEnv,
+        scope: a.scopes,
+        folder_paths: [],
+        uip_extra_args: []
+      },
+      target: { mode: "none", tenant: "", folder_paths: [], uip_extra_args: [] },
+      entities: ALL_FAMILIES
+    };
+  }
+
+  function tenantConfigs(){
+    var a = s1();
+    var mode = el("mode").value;
+    var folders = lines(el("folders").value);
+    var families = lines(el("families").value);
+    return tenants.filter(function(t){ return t.checked; }).map(function(t){
+      return {
+        migration_mode: mode,
+        source: {
+          deployment_type: a.deployment,
+          orchestrator_version: el("version").value.trim(),
+          auth_mode: "direct_rest",
+          orchestrator_url: a.base,
+          identity_url: a.identity,
+          tenant: t.name,
+          client_id_env: a.idEnv,
+          client_secret_env: a.secretEnv,
+          scope: a.scopes,
+          folder_paths: folders,
+          uip_extra_args: []
+        },
+        target: { mode: "none", tenant: "", folder_paths: [], uip_extra_args: [] },
+        entities: families.length ? families : ALL_FAMILIES,
+        package_staging_folder: "DownloadedPackages",
+        request_interval_ms: 250,
+        batch_size: 1000,
+        queue_item_batch_size: 100,
+        continue_on_entity_error: true,
+        continue_on_folder_error: true,
+        continue_on_package_error: true,
+        continue_on_library_error: true,
+        continue_on_apply_error: true,
+        credential_asset_password_mode: "dummy",
+        dummy_credential_password: "DummyPassword",
+        webhook_dummy_secret: "RotateThisWebhookSecret"
+      };
+    });
+  }
+
+  function readProbe(){
+    var raw = el("probePaste").value.trim();
+    if(!raw){ authState = null; return; }
+    var data;
+    try { data = JSON.parse(raw); }
+    catch(e){ authState = {ok:false, text:"That is not valid JSON. Paste the whole connection check result."}; return; }
+
+    if(data.credentials_present === false){
+      authState = {ok:false, text:"The credential environment variables were not set in the shell that ran the " +
+        "check, so nothing was contacted. Set them there and run it again."};
+      return;
+    }
+    var reachable = data.reachable !== false;
+    if(!reachable){
+      authState = {ok:false, text:"The Orchestrator could not be reached from the machine that ran the check. " +
+        "Run the migration commands from a host that can reach it."};
+      return;
+    }
+    if(!data.authenticated){
+      authState = {ok:false, text:"Reached the Identity endpoint, but the token was rejected. Confirm the credential " +
+        "environment variables are set in that shell and the scopes are valid."};
+      return;
+    }
+
+    var found = Array.isArray(data.tenants) ? data.tenants : [];
+    found.forEach(function(t){
+      var name = typeof t === "string" ? t : t.name;
+      if(!name) return;
+      if(!tenants.some(function(x){ return x.name === name; })){
+        var meta = (typeof t === "object" && t.enabled === false) ? "disabled" : "";
+        tenants.push({name:name, meta:meta, checked:false});
+      }
+    });
+
+    if(found.length){
+      authState = {ok:true, text:"Authenticated, and " + found.length + " tenant" + (found.length===1?"":"s") +
+        " listed below."};
+    } else if(data.tenant_enumeration === "refused"){
+      authState = {ok:true, text:"Authenticated, but listing tenants was refused — that needs OR.Administration " +
+        "and a host-scoped application. Discovery itself does not need it, so add your tenant names by hand."};
+    } else {
+      authState = {ok:true, text:"Authenticated, but no tenants were returned. The application is probably " +
+        "tenant-scoped. Add your tenant name by hand."};
+    }
+  }
+
+  var drawnSignature = null;
+
+  function tenantCount(){
+    var n = tenants.filter(function(t){ return t.checked; }).length;
+    el("tCount").textContent = n ? n + " of " + tenants.length + " selected" : "none selected";
+  }
+
+  // Rebuild only when the tenant set itself changes. Redrawing on every render
+  // would replace the checkbox nodes mid-click, dropping selections and losing
+  // keyboard focus.
+  function drawTenants(){
+    var signature = tenants.map(function(t){ return t.name + "|" + t.meta; }).join(" :: ");
+    if(signature === drawnSignature){ tenantCount(); return; }
+    drawnSignature = signature;
+
+    var box = el("tenantList");
+    if(!tenants.length){
+      box.className = "tenants empty";
+      box.textContent = "No tenants yet — paste a connection check result, or add one by name.";
+      el("tCount").textContent = "none selected";
+      return;
+    }
+    box.className = "tenants";
+    box.textContent = "";
+    tenants.forEach(function(t, i){
+      var row = document.createElement("label");
+      row.className = "trow";
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = t.checked;
+      cb.addEventListener("change", function(){ tenants[i].checked = cb.checked; render(); });
+      var name = document.createElement("span");
+      name.className = "tname"; name.textContent = t.name;
+      row.appendChild(cb); row.appendChild(name);
+      if(t.meta){
+        var meta = document.createElement("span");
+        meta.className = "tmeta"; meta.textContent = t.meta;
+        row.appendChild(meta);
+      }
+      box.appendChild(row);
+    });
+    var n = tenants.filter(function(t){return t.checked;}).length;
+    el("tCount").textContent = n ? n + " of " + tenants.length + " selected" : "none selected";
+  }
+
+  function render(){
+    var a = s1();
+    var p1 = s1Problems(a);
+    var step1Ok = p1.length === 0;
+
+    el("appBlocker").classList.toggle("on", !a.hasApp);
+    var urlBad = el("orchUrl").value.trim() !== "" && !validUrl(a.base);
+    el("orchUrl").setAttribute("aria-invalid", urlBad ? "true" : "false");
+    el("orchUrlErr").textContent = urlBad ? "Include the scheme, e.g. https://uipath.contoso.local" : "";
+
+    readProbe();
+    el("authOk").classList.toggle("on", !!(authState && authState.ok));
+    el("authBad").classList.toggle("on", !!(authState && !authState.ok));
+    if(authState && authState.ok) el("authOkText").textContent = authState.text;
+    if(authState && !authState.ok) el("authBadText").textContent = authState.text;
+
+    // An explicit failure locks step 2 even if tenants were added by hand: a check
+    // that came back unreachable or rejected must not be worked around.
+    var failed = !!(authState && !authState.ok);
+    var unlocked = step1Ok && !failed && ((authState && authState.ok) || tenants.length > 0);
+    el("stage2").classList.toggle("locked", !unlocked);
+    el("authChip").className = "chip " + (unlocked ? "ready" : "wait");
+    el("authChip").textContent = unlocked ? "Connected" : "Awaiting authentication";
+
+    var mode = el("mode").value;
+    el("foldersReq").hidden = mode !== "folder_subset";
+    el("familiesReq").hidden = mode !== "entity_subset";
+    el("modeHint").textContent = (mode === "lift_and_shift" || mode === "assessment_only")
+      ? "Folder and entity scope are open: every discoverable folder, all twenty families, in each selected tenant."
+      : "The analysis report is produced either way, before anything is downloaded or written.";
+
+    drawTenants();
+
+    var chosen = tenants.filter(function(t){ return t.checked; });
+    var p2 = [];
+    if(!chosen.length) p2.push("at least one tenant");
+    if(!el("version").value.trim()) p2.push("Orchestrator version");
+    if(mode === "folder_subset" && !lines(el("folders").value).length) p2.push("at least one folder path");
+    if(mode === "entity_subset" && !lines(el("families").value).length) p2.push("at least one entity family");
+
+    el("probeBtn").disabled = !step1Ok;
+    el("probeBtn2").disabled = !step1Ok;
+    var ready = unlocked && p2.length === 0;
+    el("copyBtn").disabled = !ready;
+    el("copyBtn2").disabled = !ready;
+    el("finalNote").textContent = ready
+      ? "Copy this and paste it back to me. One configuration per selected tenant; I run the analysis and return the report."
+      : "Finish the required fields above to enable this.";
+    el("chip").className = "chip " + (ready ? "ready" : "wait");
+    el("chip").textContent = ready ? (chosen.length + " config" + (chosen.length===1?"":"s") + " ready")
+      : (step1Ok ? "Step 2 incomplete" : "Step 1 incomplete");
+
+    if(!step1Ok){
+      el("missing").innerHTML = "Step 1 still needs: <b>" + p1.join("</b>, <b>") + "</b>";
+      el("out").textContent = "Complete step 1, then copy the connection check.";
+    } else if(!unlocked){
+      el("missing").innerHTML = "Copy the connection check, run it, and paste the result into step 2.";
+      el("out").textContent = JSON.stringify(probeConfig(a), null, 2);
+    } else if(p2.length){
+      el("missing").innerHTML = "Step 2 still needs: <b>" + p2.join("</b>, <b>") + "</b>";
+      el("out").textContent = JSON.stringify(probeConfig(a), null, 2);
+    } else {
+      el("missing").innerHTML = "One configuration per selected tenant. Target is <b>none</b>, so each run analyses " +
+        "the source only and every write command refuses to run.";
+      el("out").textContent = JSON.stringify(tenantConfigs(), null, 2);
+    }
+  }
+
+  ["orchUrl","identityUrl","deployment","hasApp","scopes","idEnv","secretEnv",
+   "probePaste","version","mode","folders","families"].forEach(function(id){
+    el(id).addEventListener("input", render);
+    el(id).addEventListener("change", render);
+  });
+
+  function setAll(value){
+    tenants.forEach(function(t){ t.checked = value; });
+    var boxes = document.querySelectorAll("#tenantList .trow input");
+    for(var i = 0; i < boxes.length; i++){ boxes[i].checked = value; }
+    render();
+  }
+  el("allBtn").addEventListener("click", function(){ setAll(true); });
+  el("noneBtn").addEventListener("click", function(){ setAll(false); });
+  el("addBtn").addEventListener("click", function(){
+    var name = el("manualTenant").value.trim();
+    if(name && !tenants.some(function(t){return t.name===name;})){
+      tenants.push({name:name, meta:"added by hand", checked:true});
+      el("manualTenant").value = "";
+    }
+    render();
+  });
+  el("manualTenant").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); el("addBtn").click(); }
+  });
+
+  function copy(text, btn, done){
+    var reset = btn.textContent;
+    navigator.clipboard.writeText(text).then(function(){
+      btn.textContent = done;
+      setTimeout(function(){ btn.textContent = reset; }, 1400);
+    }).catch(function(){
+      btn.textContent = "Select the text below instead";
+      setTimeout(function(){ btn.textContent = reset; }, 2200);
+    });
+  }
+  function copyProbe(btn){ copy(JSON.stringify(probeConfig(s1()), null, 2), btn, "Copied - paste it to me"); }
+  function copyFinal(btn){ copy(JSON.stringify(tenantConfigs(), null, 2), btn, "Copied - paste it to me"); }
+  el("probeBtn").addEventListener("click", function(){ copyProbe(this); });
+  el("probeBtn2").addEventListener("click", function(){ copyProbe(this); });
+  el("copyBtn").addEventListener("click", function(){ copyFinal(this); });
+  el("copyBtn2").addEventListener("click", function(){ copyFinal(this); });
+
+  SEEDED_TENANTS.forEach(function(t){
+    tenants.push({name: typeof t === "string" ? t : t.name, meta:"", checked:false});
+  });
+  render();
+</script>

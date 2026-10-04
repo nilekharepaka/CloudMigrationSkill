@@ -1,24 +1,42 @@
-# Operator-local migration configuration and secrets-adjacent run artifacts
+# uipath-cloud-migration artifacts — operator-local, never commit.
+# These contain full tenant inventories. Secrets are never written to them
+# (credentials come from environment variables at runtime), but the
+# inventories themselves are sensitive.
+
+.local/
 migration.local.json
-migration*.local.json
-
-# Discovery, planning, validation, and apply outputs
-*-discovery*.json
+*.local.json
 *discovery*.json
+source.json
+target.json
 *migration-plan*.json
-*plan*.json
-*apply*.json
-*stage-report*.json
 *analysis*.xlsx
-*analysis*.json
-*migration-report*.md
-*not-migrated*.csv
-*skipped*.csv
-
-# Package staging/download folders
+*analysis*.html
+*apply*.json
+*apply*.xlsx
+*stage-report*.json
 DownloadedPackages/
-DownloadedPackages*/
+.migration-state/
+probe-result.json
+*.nupkg
+*.log
 
-# Python cache
+# Secrets and local environment
+.env
+.env.*
+
+# Python
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+
+# Node/build output
+node_modules/
+dist/
+build/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
